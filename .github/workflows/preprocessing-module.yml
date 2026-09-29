@@ -1,0 +1,35 @@
+name: Preprocessing Module CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'preprocessing_module/**'
+  workflow_dispatch:
+
+jobs:
+  run-preprocessing:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: preprocessing_module
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-preprocessing-${{ hashFiles('preprocessing_module/requirements.txt') }}
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run pipeline
+        run: python pipeline.py

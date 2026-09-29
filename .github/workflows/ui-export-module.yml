@@ -1,0 +1,35 @@
+name: UI Export Module CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'ui_export_module/**'
+  workflow_dispatch:
+
+jobs:
+  run-ui-export:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ui_export_module
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-ui-export-${{ hashFiles('ui_export_module/requirements.txt') }}
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run app
+        run: python app.py
