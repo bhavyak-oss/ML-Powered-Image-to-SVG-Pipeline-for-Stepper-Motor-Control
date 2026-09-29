@@ -1,0 +1,24 @@
+{
+  "document_id": "doc_sample_001",
+  "page_dimensions_mm": { "width": 210.0, "height": 297.0 },
+  "text_elements": [
+    {
+      "id": "txt_01",
+      "text": "Hello World",
+      "x_mm": 30.5,
+      "y_mm": 45.0,
+      "font_size_mm": 8.0,
+      "confidence": 0.985,
+      "bounding_box_pixel": [120, 180, 450, 230]
+    },
+    {
+      "id": "txt_02",
+      "text": "Phase 1",
+      "x_mm": 30.5,
+      "y_mm": 65.0,
+      "font_size_mm": 8.0,
+      "confidence": 0.91,
+      "bounding_box_pixel": [120, 260, 320, 310]
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+streamlit>=1.32
+Pillow>=10.0
+svgwrite>=1.4
+numpy>=1.24
+
+# Optional: swap the built-in stick font in hershey_font.py for a real
+# Hershey glyph set by installing this and calling set_backend("hershey"):
+# hershey-fonts>=2.1

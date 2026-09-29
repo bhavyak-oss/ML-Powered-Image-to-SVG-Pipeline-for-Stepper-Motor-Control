@@ -1,0 +1,9 @@
+paddleocr>=2.7
+paddlepaddle-gpu>=2.5   # use paddlepaddle (CPU build) if no GPU available
+transformers>=4.38
+torch>=2.1
+jiwer>=3.0
+editdistance>=0.6
+albumentations>=1.4
+numpy>=1.24
+Pillow>=10.0
