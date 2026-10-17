@@ -2,18 +2,14 @@
 hershey_font.py
 ----------------
 Converts text strings into single-stroke (centerline) line segments — no
-filled outlines, so a plotter never double-traces a character (Sec 2.2 of
-the execution plan).
+filled outlines, so a plotter never double-traces a character.
 
-Ships with a small BUILT-IN stick font (all uppercase letters, digits, and
-common punctuation) defined as straight-line strokes on a unit grid, so this
-file works immediately with zero extra dependencies beyond the base
-requirements.txt.
+Built-in stick font (uppercase, digits, common punctuation) on a unit grid.
 
-If a richer glyph set is wanted later, install the `hershey-fonts` PyPI
-package and call `set_backend("hershey")` — every other function in this
-file (and in svg_export.py) keeps working unchanged, since they only ever
-call `char_to_strokes()` / `text_to_strokes()`.
+CHANGES (patch):
+  * text_to_strokes ab x_scale (akshar chaude) aur chhota advance_ratio leta hai,
+    isse akshar patle-lambe nahi lagte aur spacing tight hoti hai.
+  * text_width() add kiya - layout ke liye rendered width pata chale.
 """
 
 from __future__ import annotations
@@ -21,14 +17,6 @@ from typing import Dict, List, Tuple
 
 Point = Tuple[float, float]
 Segment = Tuple[Point, Point]
-
-# ---------------------------------------------------------------------------
-# Built-in stick font
-# ---------------------------------------------------------------------------
-# Grid: x in [0, GLYPH_WIDTH], y in [0, GLYPH_HEIGHT], baseline at y=0,
-# cap-height at y=GLYPH_HEIGHT. Each character maps to a list of polylines;
-# points within one polyline are pen-down (connected), and there is a pen-up
-# jump between separate polylines.
 
 GLYPH_WIDTH = 3.0
 GLYPH_HEIGHT = 7.0
@@ -40,9 +28,9 @@ _BL, _BM, _BR = (0.0, 0.0), (1.5, 0.0), (3.0, 0.0)
 STROKE_FONT: Dict[str, List[List[Point]]] = {
     " ": [],
     "A": [[_BL, _TM, _BR], [_ML, _MR]],
-    "B": [[_BL, _TL], [_TL, _TR, _MR, _ML], [_ML, _BR, _BL]],
+    "B": [[_BL, _TL, (2.2, 7.0), (3.0, 6.0), (3.0, 5.0), (2.2, 4.0), _ML], [(2.2, 4.0), (3.0, 3.0), (3.0, 1.0), (2.2, 0.0), _BL]],
     "C": [[_TR, _TL, _BL, _BR]],
-    "D": [[_BL, _TL], [_TL, _TR, _BR, _BL]],
+    "D": [[_BL, _TL, (2.0, 7.0), (3.0, 5.5), (3.0, 1.5), (2.0, 0.0), _BL]],
     "E": [[_TR, _TL, _BL, _BR], [_ML, _MR]],
     "F": [[_BL, _TL, _TR], [_ML, _MR]],
     "G": [[_TR, _TL, _BL, _BR, _MR, _MM]],
@@ -81,9 +69,20 @@ STROKE_FONT: Dict[str, List[List[Point]]] = {
     ":": [[(1.4, 5.0), (1.6, 5.0)], [(1.4, 2.0), (1.6, 2.0)]],
     "'": [[(1.5, 7.0), (1.7, 5.5)]],
     "/": [[_BL, _TR]],
+    '"': [[(0.8, 7.0), (0.8, 5.5)], [(2.2, 7.0), (2.2, 5.5)]],
+    "?": [[(0.0, 6.0), (0.0, 7.0), (3.0, 7.0), (3.0, 4.0), (1.5, 4.0), (1.5, 2.5)], [(1.4, 0.0), (1.6, 0.0)]],
+    "!": [[(1.5, 7.0), (1.5, 2.0)], [(1.4, 0.0), (1.6, 0.0)]],
+    "(": [[(2.2, 7.0), (1.0, 5.5), (1.0, 1.5), (2.2, 0.0)]],
+    ")": [[(0.8, 7.0), (2.0, 5.5), (2.0, 1.5), (0.8, 0.0)]],
 }
 
 _UNSUPPORTED_WARNED: set = set()
+_ALIASES = {'\u201c': '"', '\u201d': '"', '\u2018': "'", '\u2019': "'",
+            '\u2013': '-', '\u2014': '-'}
+
+# Layout defaults (patch)
+DEFAULT_X_SCALE = 1.35      # glyph width = 3/7 * 1.35 ~ 0.58 * font_size
+DEFAULT_ADVANCE = 0.78      # har akshar ke beech ka total step (glyph + gap)
 
 
 def _polylines_to_segments(polylines: List[List[Point]]) -> List[Segment]:
@@ -95,8 +94,7 @@ def _polylines_to_segments(polylines: List[List[Point]]) -> List[Segment]:
 
 
 def _normalize(segments: List[Segment]) -> List[Segment]:
-    """Scale the grid down so cap-height = 1.0 (unit height), matching the
-    'font_size_mm' convention used everywhere else in the pipeline."""
+    """Scale the grid down so cap-height = 1.0 (unit height)."""
     return [
         ((x1 / GLYPH_HEIGHT, y1 / GLYPH_HEIGHT), (x2 / GLYPH_HEIGHT, y2 / GLYPH_HEIGHT))
         for (x1, y1), (x2, y2) in segments
@@ -104,7 +102,7 @@ def _normalize(segments: List[Segment]) -> List[Segment]:
 
 
 # ---------------------------------------------------------------------------
-# Optional real Hershey-font backend
+# Optional real Hershey-font backend (UNTESTED - abhi use mat karo)
 # ---------------------------------------------------------------------------
 _BACKEND = "builtin"
 _hershey_instance = None
@@ -117,10 +115,6 @@ except ImportError:
 
 
 def set_backend(name: str) -> None:
-    """
-    Switch the glyph source. "builtin" (default) always works. "hershey"
-    requires `pip install hershey-fonts` and gives noticeably nicer letterforms.
-    """
     global _BACKEND, _hershey_instance
 
     if name == "builtin":
@@ -143,14 +137,10 @@ def set_backend(name: str) -> None:
 
 
 def char_to_strokes(char: str) -> List[Segment]:
-    """
-    Return unit-height (0..1) line segments for one character.
-    Unsupported characters are skipped (return []) rather than raising, so a
-    stray symbol in OCR output never crashes the export.
-    """
     if _BACKEND == "hershey" and _hershey_instance is not None:
         return list(_hershey_instance.strokes_for_character(char))
 
+    char = _ALIASES.get(char, char)
     glyph = STROKE_FONT.get(char.upper())
     if glyph is None:
         if char not in _UNSUPPORTED_WARNED:
@@ -160,20 +150,27 @@ def char_to_strokes(char: str) -> List[Segment]:
     return _normalize(_polylines_to_segments(glyph))
 
 
+def text_width(text: str, font_size_mm: float,
+               advance_ratio: float = DEFAULT_ADVANCE,
+               x_scale: float = DEFAULT_X_SCALE) -> float:
+    """Rendered width in mm (last glyph ke baad ka gap nahi)."""
+    if not text:
+        return 0.0
+    glyph_w = (GLYPH_WIDTH / GLYPH_HEIGHT) * x_scale * font_size_mm
+    return (len(text) - 1) * advance_ratio * font_size_mm + glyph_w
+
+
 def text_to_strokes(
     text: str,
     x_mm: float,
     y_mm: float,
     font_size_mm: float,
-    advance_ratio: float = 0.75,
+    advance_ratio: float = DEFAULT_ADVANCE,
+    x_scale: float = DEFAULT_X_SCALE,
 ) -> List[Segment]:
     """
-    Lay out `text` left-to-right and return absolute-mm line segments.
-
-    `x_mm, y_mm` is the TOP-LEFT corner of the text (matching
-    document_schema.json, where y_mm comes from the bounding box's y_min in
-    a y-down pixel space) — so glyph y=1 (cap height) sits at y_mm, and
-    glyph y=0 (baseline) sits at y_mm + font_size_mm.
+    Lay out `text` left-to-right; (x_mm, y_mm) is the TOP-LEFT corner.
+    Glyph cap-height = font_size_mm.
     """
     segments: List[Segment] = []
     cursor_x = x_mm
@@ -181,8 +178,8 @@ def text_to_strokes(
     for ch in text:
         for (ux1, uy1), (ux2, uy2) in char_to_strokes(ch):
             segments.append((
-                (cursor_x + ux1 * font_size_mm, y_mm + font_size_mm * (1 - uy1)),
-                (cursor_x + ux2 * font_size_mm, y_mm + font_size_mm * (1 - uy2)),
+                (cursor_x + ux1 * x_scale * font_size_mm, y_mm + font_size_mm * (1 - uy1)),
+                (cursor_x + ux2 * x_scale * font_size_mm, y_mm + font_size_mm * (1 - uy2)),
             ))
         cursor_x += font_size_mm * advance_ratio
 
@@ -195,5 +192,3 @@ if __name__ == "__main__":
     sample = sys.argv[1] if len(sys.argv) > 1 else "HELLO 123"
     segs = text_to_strokes(sample, x_mm=0, y_mm=0, font_size_mm=10)
     print(f"'{sample}' -> {len(segs)} line segments")
-    for seg in segs[:10]:
-        print(f"  M {seg[0][0]:.2f} {seg[0][1]:.2f} L {seg[1][0]:.2f} {seg[1][1]:.2f}")

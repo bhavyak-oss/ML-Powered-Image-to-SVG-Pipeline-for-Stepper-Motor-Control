@@ -8,17 +8,23 @@ Member 4's review UI and SVG exporter consume directly.
 
     from pipeline import run_pipeline
     doc = run_pipeline("test_images/sample_dark.jpg", use_finetuned=True)
+
+CHANGES (patch): tute hue boxes ek line me merge (line_merge.py) aur
+OCR ke baad vocab-based spelling correction (postprocess.py).
 """
 
 from __future__ import annotations
 import os
 import json
+import tempfile
 from typing import List, Dict, Any, Optional
 
-from PIL import Image
+from PIL import Image, ImageOps
 
 from baseline import run_baseline_ocr
 from finetune import load_finetuned_model, run_finetuned_ocr, DEFAULT_OUTPUT_DIR
+from line_merge import merge_line_boxes
+from postprocess import load_vocab, correct_text
 
 # Assumed scan/capture resolution used to convert pixel measurements into
 # physical millimeters. Override per-document if the real DPI is known.
@@ -37,15 +43,21 @@ def _quad_to_bbox(quad: List[List[float]]) -> List[float]:
 
 
 def _predictions_to_text_elements(
-    predictions: List[Dict[str, Any]], dpi: float
+    predictions: List[Dict[str, Any]], dpi: float, spell_fix: bool = True
 ) -> List[Dict[str, Any]]:
+    vocab = load_vocab() if spell_fix else []
     elements = []
     for i, pred in enumerate(predictions):
         bbox_px = _quad_to_bbox(pred["box"]) if isinstance(pred["box"][0], list) else pred["box"]
         x_min, y_min, x_max, y_max = bbox_px
+        raw_text = pred["text"]
+        # vocab sirf kam-confidence text par; accha OCR text na chhedo
+        text = (correct_text(raw_text, vocab)
+                if (vocab and float(pred["confidence"]) < 0.9) else raw_text.strip())
         elements.append({
             "id": f"txt_{i + 1:02d}",
-            "text": pred["text"],
+            "text": text,
+            "raw_text": raw_text,
             "x_mm": round(_px_to_mm(x_min, dpi), 2),
             "y_mm": round(_px_to_mm(y_min, dpi), 2),
             "font_size_mm": round(_px_to_mm(y_max - y_min, dpi), 2),
@@ -53,6 +65,41 @@ def _predictions_to_text_elements(
             "bounding_box_pixel": [round(v, 1) for v in bbox_px],
         })
     return elements
+
+
+
+def _preprocess_for_ocr(image_path: str, scale: int = 2) -> str:
+    """Autocontrast + upscale: halki/krim background wali printed images ke liye."""
+    with Image.open(image_path) as img:
+        g = ImageOps.autocontrast(img.convert("L"), cutoff=2)
+        g = g.resize((g.width * scale, g.height * scale), Image.LANCZOS)
+        tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+        g.save(tmp.name)
+        return tmp.name
+
+
+def _scale_box(box, factor: float):
+    if isinstance(box[0], (list, tuple)):
+        return [[p[0] * factor, p[1] * factor] for p in box]
+    return [v * factor for v in box]
+
+
+def _ocr_score(dets) -> float:
+    return sum(len(str(d.get("text", "")).strip()) * float(d.get("confidence", 0.0)) for d in dets)
+
+
+def _detect_best(image_path: str, scale: int = 2, ocr_fn=None):
+    """Original aur preprocessed (autocontrast + upscale) dono par OCR chalao,
+    jisme zyada confident text mile wahi lo. Boxes original pixel coords me wapas."""
+    fn = ocr_fn or run_baseline_ocr
+    plain = fn(image_path)
+    up = fn(_preprocess_for_ocr(image_path, scale))
+    for d in up:
+        d["box"] = _scale_box(d["box"], 1.0 / scale)
+    use_up = _ocr_score(up) > _ocr_score(plain)
+    print(f"[pipeline] OCR: plain={_ocr_score(plain):.1f} preprocessed={_ocr_score(up):.1f} -> "
+          f"{'preprocessed' if use_up else 'plain'}")
+    return up if use_up else plain
 
 
 def _load_model(use_finetuned: bool, checkpoint_dir: str):
@@ -67,51 +114,45 @@ def run_pipeline(
     checkpoint_dir: str = DEFAULT_OUTPUT_DIR,
     dpi: float = DEFAULT_DPI,
     document_id: Optional[str] = None,
+    spell_fix: bool = True,
+    merge_lines: bool = True,
+    ocr_fn=None,
 ) -> Dict[str, Any]:
     """
     Run OCR on a single image and return a dict matching
     schemas/document_schema.json.
 
-    Parameters
-    ----------
-    image_path : str
-        Path to a preprocessed image (deskewed / binarized) from Member 2.
-    use_finetuned : bool
-        If True, loads the fine-tuned TrOCR checkpoint. If False, falls
-        back to the pretrained PaddleOCR baseline. Fine-tuned inference
-        currently returns one transcription for the whole image rather than
-        per-region boxes; for region-level output during development, keep
-        use_finetuned=False and cross-check text against the finetuned model
-        separately until per-region fine-tuned inference is wired up.
-    dpi : float
-        Capture/scan resolution used to convert pixel coordinates to mm.
-    document_id : str, optional
-        Defaults to the image's filename (without extension).
+    use_finetuned : True  -> detection baseline se, recognition fine-tuned TrOCR se
+                    False -> poora PaddleOCR baseline
+    spell_fix     : vocab.txt se spelling correction
+    merge_lines   : ek line ke tute boxes jodna
     """
     doc_id = document_id or os.path.splitext(os.path.basename(image_path))[0]
 
     with Image.open(image_path) as img:
         width_mm = round(_px_to_mm(img.width, dpi), 1)
         height_mm = round(_px_to_mm(img.height, dpi), 1)
+        px_w, px_h = img.width, img.height
+
+    detections = _detect_best(image_path, ocr_fn=ocr_fn)
+    if merge_lines:
+        detections = merge_line_boxes(detections)
 
     if use_finetuned:
         processor, model = _load_model(use_finetuned, checkpoint_dir)
-        # Region detection still comes from the baseline detector; only the
-        # recognition step uses the fine-tuned decoder.
-        detections = run_baseline_ocr(image_path)
         for det in detections:
             crop_path = _crop_to_temp(image_path, det["box"])
             det["text"] = run_finetuned_ocr(crop_path, processor, model)
-        predictions = detections
-    else:
-        predictions = run_baseline_ocr(image_path)
+    predictions = detections
 
-    text_elements = _predictions_to_text_elements(predictions, dpi)
+    text_elements = _predictions_to_text_elements(predictions, dpi, spell_fix)
 
     return {
         "document_id": doc_id,
         "page_dimensions_mm": {"width": width_mm, "height": height_mm},
         "text_elements": text_elements,
+        "image_px": {"width": px_w, "height": px_h},
+        "dpi": dpi,
     }
 
 

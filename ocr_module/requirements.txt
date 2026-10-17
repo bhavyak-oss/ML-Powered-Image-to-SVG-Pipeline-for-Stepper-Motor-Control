@@ -1,5 +1,5 @@
 paddleocr>=2.7
-paddlepaddle-gpu>=2.5   # use paddlepaddle (CPU build) if no GPU available
+paddlepaddle   # use paddlepaddle (CPU build) if no GPU available
 transformers>=4.38
 torch>=2.1
 jiwer>=3.0

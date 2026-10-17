@@ -1,16 +1,15 @@
 """
 svg_export.py
 --------------
-Converts a Semantic JSON document (schemas/document_schema.json, the same
-format Member 3's pipeline.py produces) into either:
+Semantic JSON document -> Plot-Ready SVG (stroke-only) ya Editable SVG.
 
-    - a Plot-Ready SVG  — stroke-only <path>, fill="none", for CNC/pen
-      plotters (Sec 2.1 / Step 6 of the execution plan)
-    - an Editable SVG   — normal <text> elements, for viewing/editing in
-      Inkscape, Illustrator, Figma, etc.
-
-Zero Streamlit dependency, so this can be unit-tested or run headless in CI
-independently of app.py.
+CHANGES (patch):
+  * layout_elements(): lines ko group karta hai, ek jaisa font size deta hai,
+    line pitch font ke hisaab se rakhta hai -> overlap nahi hota, width
+    max_width_mm me fit hoti hai.
+  * write_plot_ready_svg(): asli strokes ke bounding box se viewBox nikalta hai
+    aur content ko (margin, margin) par shift karta hai -> kuch cut nahi hota.
+  * write_editable_svg() wapas add kiya (pichhle patch me gayab ho gaya tha).
 """
 
 from __future__ import annotations
@@ -20,7 +19,7 @@ from typing import Any, Dict, List, Tuple
 
 import svgwrite
 
-from hershey_font import text_to_strokes
+from hershey_font import text_to_strokes, text_width, DEFAULT_ADVANCE
 
 Point = Tuple[float, float]
 Segment = Tuple[Point, Point]
@@ -38,16 +37,77 @@ def save_document_json(doc: Dict[str, Any], path: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Layout
+# ---------------------------------------------------------------------------
+
+def layout_elements(
+    doc: Dict[str, Any],
+    max_width_mm: float = 180.0,
+    margin_mm: float = 8.0,
+    min_fs: float = 3.5,
+    max_fs: float = 6.0,
+    line_gap_ratio: float = 0.9,
+    adv: float = DEFAULT_ADVANCE,
+) -> List[Dict[str, Any]]:
+    """Return [{'text','x','y','fs'}] - no overlap, uniform font, fits page width."""
+    els = [dict(e, text=str(e["text"]).strip()) for e in doc["text_elements"]
+           if str(e.get("text", "")).strip()]
+    if not els:
+        return []
+
+    for e in els:
+        e["_yc"] = e["y_mm"] + e["font_size_mm"] / 2.0
+    hs = sorted(max(e["font_size_mm"], 0.1) for e in els)
+    med_h = hs[len(hs) // 2]
+    fs = min(max(med_h * 0.8, min_fs), max_fs)
+
+    # 1) line grouping (y-centre ke hisaab se)
+    els.sort(key=lambda e: e["_yc"])
+    lines: List[List[Dict[str, Any]]] = []
+    for e in els:
+        if lines:
+            yc_mean = sum(x["_yc"] for x in lines[-1]) / len(lines[-1])
+            if abs(e["_yc"] - yc_mean) <= 0.6 * med_h:
+                lines[-1].append(e)
+                continue
+        lines.append([e])
+    for ln in lines:
+        ln.sort(key=lambda e: e["x_mm"])
+
+    gx0 = min(e["x_mm"] for e in els)
+    avail = max_width_mm - 2 * margin_mm
+
+    def place(fs_try: float):
+        placed, widest = [], 0.0
+        pitch = fs_try * (1.0 + line_gap_ratio)
+        for i, ln in enumerate(lines):
+            cursor = 0.0
+            for e in ln:
+                x_rel = max(e["x_mm"] - gx0, cursor)
+                w = text_width(e["text"], fs_try, adv)
+                placed.append({"text": e["text"], "x": margin_mm + x_rel,
+                               "y": margin_mm + i * pitch, "fs": fs_try})
+                cursor = x_rel + w + 2 * adv * fs_try   # do akshar ka gap
+                widest = max(widest, x_rel + w)
+        return placed, widest
+
+    placed, widest = place(fs)
+    while widest > avail and fs > 2.0:
+        fs *= 0.95
+        placed, widest = place(fs)
+    if widest > avail:
+        print(f"[svg_export] WARNING: content {widest:.1f}mm > available {avail:.1f}mm")
+    return placed
+
+
+# ---------------------------------------------------------------------------
 # Plot-Ready SVG
 # ---------------------------------------------------------------------------
 
 def compile_strokes(doc: Dict[str, Any]) -> List[Segment]:
-    """Every text_element -> stroke segments (see hershey_font.text_to_strokes)."""
     segments: List[Segment] = []
-    for el in doc["text_elements"]:
-        segments += text_to_strokes(
-            el["text"], el["x_mm"], el["y_mm"], el["font_size_mm"]
-        )
+    for p in layout_elements(doc):
+        segments += text_to_strokes(p["text"], p["x"], p["y"], p["fs"])
     return segments
 
 
@@ -55,63 +115,52 @@ def write_plot_ready_svg(
     segments: List[Segment],
     page_mm: Dict[str, float],
     out_path: str,
-    stroke_width_mm: float = 0.5,
+    stroke_width_mm: float = 0.35,
+    margin: float = 8.0,
 ) -> str:
-    """
-    Write a stroke-only SVG: fill="none", one merged <path> for the whole
-    page. One merged path keeps the file small and lets the plotter driver
-    optimize pen-up travel order.
-    """
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+    if segments:
+        xs = [p[0] for seg in segments for p in seg]
+        ys = [p[1] for seg in segments for p in seg]
+        dx, dy = margin - min(xs), margin - min(ys)
+        w = max(xs) - min(xs) + 2 * margin
+        h = max(ys) - min(ys) + 2 * margin
+    else:
+        dx = dy = 0.0
+        w, h = page_mm["width"], page_mm["height"]
 
-    w, h = page_mm["width"], page_mm["height"]
-    dwg = svgwrite.Drawing(out_path, size=(f"{w}mm", f"{h}mm"), viewBox=f"0 0 {w} {h}")
-
+    dwg = svgwrite.Drawing(out_path, size=(f"{w:.2f}mm", f"{h:.2f}mm"),
+                           viewBox=f"0 0 {w:.2f} {h:.2f}")
     if segments:
         d = " ".join(
-            f"M {x1:.2f} {y1:.2f} L {x2:.2f} {y2:.2f}"
-            for (x1, y1), (x2, y2) in segments
+            f"M {a[0] + dx:.2f} {a[1] + dy:.2f} L {b[0] + dx:.2f} {b[1] + dy:.2f}"
+            for a, b in segments
         )
         dwg.add(dwg.path(d=d, fill="none", stroke="black", stroke_width=stroke_width_mm))
-
     dwg.save()
+    print(f"[svg_export] page = {w:.1f} x {h:.1f} mm")
     return out_path
 
 
-def export_plot_ready(doc: Dict[str, Any], out_path: str, stroke_width_mm: float = 0.5) -> str:
-    """Convenience wrapper: doc -> compile_strokes -> write_plot_ready_svg."""
+def export_plot_ready(doc: Dict[str, Any], out_path: str, stroke_width_mm: float = 0.35) -> str:
     segments = compile_strokes(doc)
     return write_plot_ready_svg(segments, doc["page_dimensions_mm"], out_path, stroke_width_mm)
 
 
 # ---------------------------------------------------------------------------
-# Editable SVG (for design tools — screen rendering, not plotting)
+# Editable SVG
 # ---------------------------------------------------------------------------
 
 def write_editable_svg(doc: Dict[str, Any], out_path: str, font_family: str = "Arial") -> str:
-    """
-    Write a standard editable SVG using <text> elements — the counterpart
-    described in Sec 2.1 of the execution plan. This is what a designer
-    would open in Inkscape/Illustrator; it is NOT meant for a plotter.
-    """
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
-
     page = doc["page_dimensions_mm"]
     w, h = page["width"], page["height"]
     dwg = svgwrite.Drawing(out_path, size=(f"{w}mm", f"{h}mm"), viewBox=f"0 0 {w} {h}")
-
     for el in doc["text_elements"]:
-        # y_mm is the top of the text; SVG <text> anchors on the baseline,
-        # so shift down by roughly one font-size to align with Plot-Ready output.
         baseline_y = el["y_mm"] + el["font_size_mm"]
-        dwg.add(dwg.text(
-            el["text"],
-            insert=(el["x_mm"], baseline_y),
-            font_family=font_family,
-            font_size=f"{el['font_size_mm']}mm",
-            fill="black",
-        ))
-
+        dwg.add(dwg.text(el["text"], insert=(el["x_mm"], baseline_y),
+                         font_family=font_family, font_size=f"{el['font_size_mm']}mm",
+                         fill="black"))
     dwg.save()
     return out_path
 
@@ -121,9 +170,7 @@ if __name__ == "__main__":
 
     if len(sys.argv) != 3:
         print("Usage: python svg_export.py <document.json> <output.svg>")
-        print("       (writes a Plot-Ready SVG by default)")
         sys.exit(1)
 
     document = load_document_json(sys.argv[1])
-    out_path = export_plot_ready(document, sys.argv[2])
-    print(f"Wrote Plot-Ready SVG -> {out_path}")
+    print(f"Wrote Plot-Ready SVG -> {export_plot_ready(document, sys.argv[2])}")

@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Image to plot SVG</title>
+<style>
+  :root {
+    --bg: var(--figma-color-bg, #fff);
+    --bg-2: var(--figma-color-bg-secondary, #f5f5f5);
+    --text: var(--figma-color-text, #1e1e1e);
+    --text-2: var(--figma-color-text-secondary, #6b6b6b);
+    --border: var(--figma-color-border, #e2e2e2);
+    --brand: var(--figma-color-bg-brand, #0d99ff);
+    --on-brand: var(--figma-color-text-onbrand, #fff);
+    --danger: var(--figma-color-text-danger, #d4290d);
+    --ok: var(--figma-color-text-success, #14833b);
+    --amber: #b45309;
+    --blue: #2563eb;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; }
+  body { background: var(--bg); color: var(--text); font: 12px/1.45 Inter, system-ui, sans-serif; padding: 16px 16px 12px; }
+  header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+  h1 { font-size: 14px; line-height: 20px; font-weight: 600; margin: 0; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); font-size: 11px; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--danger); }
+  .pill.on .dot { background: var(--ok); }
+
+  .step { display: grid; grid-template-columns: 22px 1fr; column-gap: 10px; padding-bottom: 16px; position: relative; opacity: .45; transition: opacity .15s; }
+  .step.active, .step.done { opacity: 1; }
+  .step::before { content: ""; position: absolute; left: 10px; top: 24px; bottom: 2px; width: 1px; background: var(--border); }
+  .step:last-of-type::before { display: none; }
+  .num { width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--border); display: grid; place-items: center; font-size: 11px; font-weight: 600; color: var(--text-2); background: var(--bg); }
+  .step.active .num { background: var(--brand); border-color: var(--brand); color: var(--on-brand); }
+  .step.done .num { background: var(--text); border-color: var(--text); color: var(--bg); }
+  .step h2 { font-size: 12px; line-height: 22px; font-weight: 600; margin: 0 0 6px; }
+  .step:not(.active):not(.done) .body { pointer-events: none; }
+
+  label { display: block; color: var(--text-2); margin-bottom: 4px; }
+  select, input[type=text] { width: 100%; height: 28px; border: 1px solid var(--border); border-radius: 5px; background: var(--bg); color: var(--text); padding: 0 6px; font: inherit; }
+  select:focus-visible, input:focus-visible, button:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+  .row { display: flex; gap: 8px; margin-top: 8px; }
+  button { height: 30px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font: inherit; font-weight: 500; cursor: pointer; }
+  button.primary { background: var(--brand); border-color: var(--brand); color: var(--on-brand); flex: 1; }
+  button:disabled { opacity: .5; cursor: default; }
+  .note { color: var(--text-2); margin: 6px 0 0; }
+  .status { margin: 8px 0 0; min-height: 17px; }
+  .status.err { color: var(--danger); }
+  .legend { margin: 8px 0 0; padding: 0; list-style: none; }
+  .legend li { display: flex; align-items: baseline; gap: 6px; margin-top: 3px; color: var(--text-2); }
+  .legend i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; flex: none; transform: translateY(0); }
+  .warns { margin: 8px 0 0; padding-left: 16px; color: var(--amber); }
+  details { margin-top: 2px; border-top: 1px solid var(--border); padding-top: 10px; }
+  summary { color: var(--text-2); cursor: pointer; }
+  details input { margin-top: 8px; }
+  @media (prefers-reduced-motion: reduce) { .step { transition: none; } }
+</style>
+</head>
+<body>
+  <header>
+    <h1>Image to plot SVG</h1>
+    <span class="pill" id="pill"><span class="dot"></span><span id="pillText">Server offline</span></span>
+  </header>
+
+  <section class="step active" id="s1">
+    <div class="num">1</div>
+    <div class="body">
+      <h2>Scan selection</h2>
+      <label for="lang">Language in the image</label>
+      <select id="lang"><option value="en">English</option></select>
+      <div class="row"><button class="primary" id="scan">Scan selection</button></div>
+      <p class="status" id="scanStatus" role="status"></p>
+    </div>
+  </section>
+
+  <section class="step" id="s2">
+    <div class="num">2</div>
+    <div class="body">
+      <h2>Review text</h2>
+      <p class="note" style="margin-top:0">Fix mistakes directly in the review frame on the canvas.</p>
+      <ul class="legend">
+        <li><i style="background:var(--amber)"></i>Amber: OCR is unsure, check this line</li>
+        <li><i style="background:var(--blue)"></i>Blue: non-Latin, traced from the image. Editing the text won't change the plot</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="step" id="s3">
+    <div class="num">3</div>
+    <div class="body">
+      <h2>Export for the plotter</h2>
+      <div class="row" style="margin-top:0"><button class="primary" id="export">Export plot SVG</button></div>
+      <p class="status" id="exportStatus" role="status"></p>
+      <ul class="warns" id="warns" hidden></ul>
+      <div class="row" id="saveRow" hidden>
+        <button id="download">Download .svg</button>
+        <button id="copy">Copy SVG</button>
+      </div>
+    </div>
+  </section>
+
+  <details>
+    <summary>Server</summary>
+    <input type="text" id="server" value="http://localhost:8000" aria-label="Server URL" spellcheck="false">
+  </details>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const state = { sessionId: null, svg: null };
+const send = (pluginMessage) => parent.postMessage({ pluginMessage }, '*');
+const base = () => $('server').value.replace(/\/+$/, '');
+
+function setStep(active) {
+  [1, 2, 3].forEach((n) => {
+    const el = $('s' + n);
+    el.classList.toggle('active', n === active || (n === 3 && active >= 2));
+    el.classList.toggle('done', n < active);
+  });
+}
+function say(id, text, isErr) { const el = $(id); el.textContent = text || ''; el.classList.toggle('err', !!isErr); }
+
+async function api(path, opts) {
+  const r = await fetch(base() + path, opts);
+  if (!r.ok) {
+    let detail = '';
+    try { detail = (await r.json()).detail; } catch (e) { /* ignore */ }
+    throw new Error(detail || 'Server error ' + r.status);
+  }
+  return r.json();
+}
+
+async function checkServer() {
+  try {
+    await api('/health');
+    $('pill').classList.add('on'); $('pillText').textContent = 'Server connected';
+    const { languages } = await api('/languages');
+    const sel = $('lang'); const keep = sel.value; sel.innerHTML = '';
+    languages.forEach((l) => {
+      const o = document.createElement('option');
+      o.value = l.code; o.textContent = l.name + (l.ready ? '' : ' (model missing)'); o.disabled = !l.ready;
+      sel.appendChild(o);
+    });
+    sel.value = keep;
+  } catch (e) {
+    $('pill').classList.remove('on'); $('pillText').textContent = 'Server offline';
+  }
+}
+
+$('scan').onclick = () => {
+  say('scanStatus', 'Reading the selection…');
+  $('scan').disabled = true;
+  send({ type: 'scan' });
+};
+$('export').onclick = () => {
+  say('exportStatus', 'Building the SVG…');
+  $('export').disabled = true;
+  send({ type: 'collect' });
+};
+$('server').onchange = checkServer;
+
+$('download').onclick = () => {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([state.svg], { type: 'image/svg+xml' }));
+  a.download = 'plot-ready.svg';
+  document.body.appendChild(a); a.click(); a.remove();
+};
+$('copy').onclick = () => {
+  const ta = document.createElement('textarea');
+  ta.value = state.svg; document.body.appendChild(ta); ta.select();
+  document.execCommand('copy'); ta.remove();
+  say('exportStatus', 'SVG copied to the clipboard.');
+};
+
+onmessage = async (event) => {
+  const m = event.data.pluginMessage;
+  if (!m) return;
+  try {
+    if (m.type === 'png') {                       // plugin ne PNG diya -> server ko bhejo
+      say('scanStatus', 'Recognising text…');
+      const form = new FormData();
+      form.append('file', new Blob([m.bytes], { type: 'image/png' }), 'in.png');
+      form.append('lang', $('lang').value);
+      const result = await api('/process', { method: 'POST', body: form });
+      send({ type: 'render', result });
+    } else if (m.type === 'rendered') {            // canvas pe review frame ban gaya
+      state.sessionId = m.sessionId;
+      const lowTxt = m.low ? ` ${m.low} need a check.` : '';
+      say('scanStatus', `${m.count} text lines found.${lowTxt}`);
+      $('scan').disabled = false; $('export').disabled = false;
+      say('exportStatus', ''); $('saveRow').hidden = true; $('warns').hidden = true;
+      setStep(2);
+    } else if (m.type === 'texts') {                // edited text mila -> server se SVG
+      const res = await api('/export', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: m.sessionId || state.sessionId, edits: m.edits }),
+      });
+      state.svg = res.svg;
+      send({ type: 'svg', svg: res.svg_figma });
+      const kind = res.mode === 'inplace' ? 'Original layout kept' : 'Clean line layout';
+      say('exportStatus', `Done. ${kind}.`);
+      const w = $('warns'); w.innerHTML = '';
+      res.warnings.forEach((t) => { const li = document.createElement('li'); li.textContent = t; w.appendChild(li); });
+      w.hidden = res.warnings.length === 0;
+      $('saveRow').hidden = false; $('export').disabled = false;
+      setStep(3);
+    } else if (m.type === 'error') {
+      say('scanStatus', m.message, true); say('exportStatus', '', false);
+      $('scan').disabled = false; $('export').disabled = false;
+    }
+  } catch (e) {
+    const msg = e.message === 'Failed to fetch' ? 'Cannot reach the server. Is uvicorn running on ' + base() + '?' : e.message;
+    say('scanStatus', msg, true); say('exportStatus', '');
+    $('scan').disabled = false; $('export').disabled = false;
+  }
+};
+
+$('export').disabled = true;
+checkServer();
+</script>
+</body>
+</html>

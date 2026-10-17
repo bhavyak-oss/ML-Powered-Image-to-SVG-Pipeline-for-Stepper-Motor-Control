@@ -14,7 +14,11 @@ Two entry points other modules rely on:
 from __future__ import annotations
 from typing import List, Tuple
 import numpy as np
-import torch
+# import torch
+try:
+    import torch
+except ImportError:
+    torch = None
 from torch.utils.data import Dataset
 from PIL import Image
 from transformers import (
