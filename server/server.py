@@ -46,8 +46,11 @@ def _guard(fn, *a, **k):
 
 
 @app.post("/process")
-def process(file: UploadFile = File(...), lang: str = Form("en"), use_finetuned: bool = Form(False)):
+def process(file: UploadFile = File(...), lang: str = Form("en"), use_finetuned: bool = Form(False),
+            mode: str = Form("ocr")):
     data = file.file.read()
+    if mode == "trace":
+        return _guard(core.process_trace, data)
     return _guard(core.process_image, data, lang, use_finetuned)
 
 

@@ -216,3 +216,20 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# generated / local
+.DS_Store
+stages_out/
+server/sessions/
+outputs/
+models/
+eval_set/
+eval_results.csv
+eval_set_review.html
+*.svg
+/HINDI_1.png
+/hindi_boxes_all.png
+/diagram.png
+/T[0-9].*
+/test.jpg
+/test1.jpg

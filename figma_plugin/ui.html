@@ -40,6 +40,8 @@
   label { display: block; color: var(--text-2); margin-bottom: 4px; }
   select, input[type=text] { width: 100%; height: 28px; border: 1px solid var(--border); border-radius: 5px; background: var(--bg); color: var(--text); padding: 0 6px; font: inherit; }
   select:focus-visible, input:focus-visible, button:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+  .check { display: flex; align-items: center; gap: 6px; color: var(--text); margin: 10px 0 0; cursor: pointer; }
+  .check input { margin: 0; }
   .row { display: flex; gap: 8px; margin-top: 8px; }
   button { height: 30px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font: inherit; font-weight: 500; cursor: pointer; }
   button.primary { background: var(--brand); border-color: var(--brand); color: var(--on-brand); flex: 1; }
@@ -69,6 +71,8 @@
       <h2>Scan selection</h2>
       <label for="lang">Language in the image</label>
       <select id="lang"><option value="en">English</option></select>
+      <label class="check"><input type="checkbox" id="traceOnly"> Trace only (no text reading)</label>
+      <p class="note" id="traceNote" hidden>Best for handwriting, sketches and any language. The whole image is traced as lines.</p>
       <div class="row"><button class="primary" id="scan">Scan selection</button></div>
       <p class="status" id="scanStatus" role="status"></p>
     </div>
@@ -158,6 +162,11 @@ $('export').onclick = () => {
   send({ type: 'collect' });
 };
 $('server').onchange = checkServer;
+$('traceOnly').onchange = () => {
+  const on = $('traceOnly').checked;
+  $('lang').disabled = on;
+  $('traceNote').hidden = !on;
+};
 
 $('download').onclick = () => {
   const a = document.createElement('a');
@@ -181,6 +190,19 @@ onmessage = async (event) => {
       const form = new FormData();
       form.append('file', new Blob([m.bytes], { type: 'image/png' }), 'in.png');
       form.append('lang', $('lang').value);
+      if ($('traceOnly').checked) {                  // TRACE MODE: OCR ke bina seedha SVG
+        form.append('mode', 'trace');
+        const res = await api('/process', { method: 'POST', body: form });
+        state.svg = res.svg;
+        send({ type: 'svg', svg: res.svg_figma, place: 'source' });
+        say('scanStatus', 'Traced. The plot-ready SVG was added next to your image.');
+        const w = $('warns'); w.innerHTML = '';
+        res.warnings.forEach((t) => { const li = document.createElement('li'); li.textContent = t; w.appendChild(li); });
+        w.hidden = res.warnings.length === 0;
+        $('saveRow').hidden = false; $('scan').disabled = false;
+        setStep(3);
+        return;
+      }
       const result = await api('/process', { method: 'POST', body: form });
       send({ type: 'render', result });
     } else if (m.type === 'rendered') {            // canvas pe review frame ban gaya

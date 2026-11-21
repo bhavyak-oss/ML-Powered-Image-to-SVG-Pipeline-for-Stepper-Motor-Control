@@ -24,8 +24,6 @@ def load_vocab(path: str = _VOCAB_PATH) -> List[str]:
 def _match_case(original: str, replacement: str) -> str:
     if original.isupper():
         return replacement.upper()
-    if original.islower():
-        return replacement.lower()
     return replacement
 
 

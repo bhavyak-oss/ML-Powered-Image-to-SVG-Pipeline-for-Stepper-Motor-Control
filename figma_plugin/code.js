@@ -113,10 +113,15 @@ figma.ui.onmessage = async (msg) => {
 
     // 4) Plot-ready SVG ko canvas pe vector bana ke rakho
     if (msg.type === 'svg') {
-      const frame = await findReviewFrame();
       const node = figma.createNodeFromSvg(msg.svg);
       node.name = 'Plot-ready SVG';
-      if (frame) { node.x = frame.x + frame.width + 80; node.y = frame.y; }
+      if (msg.place === 'source' && sourceInfo) {        // trace mode: image ke bagal me
+        node.x = sourceInfo.x + sourceInfo.width + 80;
+        node.y = sourceInfo.y;
+      } else {
+        const frame = await findReviewFrame();
+        if (frame) { node.x = frame.x + frame.width + 80; node.y = frame.y; }
+      }
       figma.currentPage.selection = [node];
       figma.viewport.scrollAndZoomIntoView([node]);
       figma.notify('Plot-ready SVG added to the canvas');

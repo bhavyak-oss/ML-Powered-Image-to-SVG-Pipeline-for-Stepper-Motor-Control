@@ -96,6 +96,31 @@ def process_image(data: bytes, lang: str = "en", use_finetuned: bool = False) ->
     return _build(doc, sid)
 
 
+def process_trace(data: bytes) -> Dict[str, Any]:
+    """TRACE MODE: OCR ke bina poori image seedha trace (kisi bhi language / handwriting ke liye)."""
+    from PIL import Image
+    from trace_page import trace_page
+    from svg_export import write_plot_ready_svg
+
+    sid = uuid.uuid4().hex[:12]
+    d = _session_dir(sid)
+    os.makedirs(d, exist_ok=True)
+    img_path = os.path.join(d, "in.png")
+    img = Image.open(io.BytesIO(data)).convert("RGB")
+    img.save(img_path)
+    segs, (pw, ph) = trace_page(img_path)
+    out = os.path.join(d, "out.svg")
+    write_plot_ready_svg(segs, {"width": pw, "height": ph}, out)
+    with open(out, "r", encoding="utf-8") as f:
+        svg = f.read()
+    return {
+        "session_id": sid, "lang": "trace", "mode": "trace",
+        "image_px": {"width": img.width, "height": img.height}, "elements": [],
+        "svg": svg, "svg_figma": _svg_for_figma(svg),
+        "warnings": ["Trace mode: poori image seedha trace hui, text padha nahi gaya."],
+    }
+
+
 def export_session(sid: str, edits: Dict[str, str]) -> Dict[str, Any]:
     path = os.path.join(_session_dir(sid), "doc.json")
     if not os.path.exists(path):
